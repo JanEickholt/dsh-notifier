@@ -182,10 +182,27 @@ export function createTelegramInbound({ config, bus, vault, store = null, logger
         return
       }
       // v0.8 提问作答按钮：aq:<qKey>:<idx>:<token>（questions 注入时才存在此分支）
+      // PR #22：custom（c）/skip（s）辅助按钮也走此分支；自定义回答只发指引，不直接结算。
       if (parts[0] === 'aq' && questions !== null && parts.length >= 4) {
         const qKey = parts.slice(1, -2).join(':')
         const optIdx = parts[parts.length - 2]
         const token = parts[parts.length - 1]
+        // PR #22：custom/skip 先经 questions.handleCardAction 做 token/ledger/来源校验，
+        // 再决定是发指引还是走 Control Core 跳过；其余 optIdx 仍按原 Control Core 路径裁决。
+        if (optIdx === 'c' || optIdx === 'custom' || optIdx === 's' || optIdx === 'skip') {
+          const envelope = {
+            channel: 'telegram',
+            accountId: resolvedAccountId,
+            userId: String(query.from?.id ?? ''),
+            chatId: String(query.message?.chat?.id ?? ''),
+            chatType: query.message?.chat?.type,
+            messageId: String(query.id ?? ''),
+            text: `[提问按钮:${optIdx}] ${qKey}`,
+            questionAction: { qKey, optIdx, token },
+          }
+          const handled = questions.handleCardAction?.(envelope)
+          if (handled === true) return
+        }
         const verdict = control !== null
           ? control.handle({ command: 'question-answer', eventId: String(query.id ?? ''), qKey, optIdx, token, via: 'telegram', channel: 'telegram', accountId: resolvedAccountId, userId: String(query.from?.id ?? ''), chatId: String(query.message?.chat?.id ?? ''), chatType: query.message?.chat?.type })
           : questions.decide({ qKey, optIdx, token, via: 'telegram', accountId: resolvedAccountId, userId: query.from?.id, chatId: query.message?.chat?.id })
@@ -411,37 +428,53 @@ export function createTelegramInbound({ config, bus, vault, store = null, logger
     },
 
     /**
-     * v0.8 推送提问选项卡片（单选：每选项一行按钮，一选项一钮）。
+     * v0.8 推送提问选项卡片（单选：每选项一行按钮，一选项一钮；
+     * PR #22：选项后追加 ✍️ 自定义回答 / ⏭ 跳过 两个辅助按钮）。
      * @returns {Promise<{ messageId: number } | null>} 多选（暂无卡片形态）/无选项/失败
      *   返回 null，caller 降级编号回复文案——选项卡为主，编号是兜底。
      */
     async sendQuestionCard({ chatId, title, content, qKey, token, options = [], multiSelect = false }) {
       if (multiSelect === true) return null
+      const optionEntries = options
+        .map((label, idx) => {
+          const ref = refs.mint(buildQuestionAction(qKey, String(idx), token), { chatId })
+          return ref === null ? { failed: true, ref: null } : { failed: false, ref, row: {
+            text: `${idx + 1}. ${String(label).slice(0, 60)}`,
+            callback_data: `r:${ref}`,
+          } }
+        })
+      if (optionEntries.some((entry) => entry.failed === true)) {
+        for (const entry of optionEntries) if (entry.ref !== null) refs.take(entry.ref)
+        warn('提问按钮引用容量已满，本次降级为编号通知')
+        return null
+      }
+      if (optionEntries.length === 0) return null
+      // PR #22：辅助按钮继续使用现有 buildQuestionAction / r:<ref> 短引用链
+      const customRef = refs.mint(buildQuestionAction(qKey, 'c', token), { chatId })
+      const skipRef = refs.mint(buildQuestionAction(qKey, 's', token), { chatId })
+      const cardRefs = optionEntries.map((entry) => entry.ref)
+      if (customRef !== null) cardRefs.push(customRef)
+      if (skipRef !== null) cardRefs.push(skipRef)
+      // 任意辅助按钮铸造失败（容量满）→ 整张卡降级并回收本次已铸全部 ref
+      if (customRef === null || skipRef === null) {
+        for (const ref of cardRefs) refs.take(ref)
+        warn('提问辅助按钮引用容量已满，本次降级为编号通知')
+        return null
+      }
+      const rows = optionEntries.map((entry) => [entry.row])
+      rows.push([{ text: '✍️ 自定义回答', callback_data: `r:${customRef}` }])
+      rows.push([{ text: '⏭ 跳过', callback_data: `r:${skipRef}` }])
       try {
-        // v0.6.2 同审批卡：callback_data 只放短引用 r:<ref>（TG 64 字节硬限，P7）
-        const rowEntries = options
-          .map((label, idx) => {
-            const ref = refs.mint(buildQuestionAction(qKey, String(idx), token), { chatId })
-            return ref === null ? { failed: true, ref: null } : { failed: false, ref, row: {
-              text: `${idx + 1}. ${String(label).slice(0, 60)}`,
-              callback_data: `r:${ref}`,
-            } }
-          })
-        if (rowEntries.some((entry) => entry.failed === true)) {
-          for (const entry of rowEntries) if (entry.ref !== null) refs.take(entry.ref)
-          warn('提问按钮引用容量已满，本次降级为编号通知')
-          return null
-        }
-        const rows = rowEntries.map((entry) => entry.row)
-        if (rows.length === 0) return null
         const result = await api('sendMessage', {
           chat_id: chatId,
           // P1-1：提问 context 无上游上限（ask_user 入参直传），统一过 4096 钳制
           text: clampTelegramText(`❓ ${title}\n\n${content}`),
-          reply_markup: { inline_keyboard: rows.map((row) => [row]) }, // 一选项一行，手机端可读
+          reply_markup: { inline_keyboard: rows }, // 一选项一行 + 辅助按钮各一行
         })
         return { messageId: result?.message_id }
       } catch (error) {
+        // PR #22：sendMessage 失败时回收本次卡片全部 callback refs，避免泄漏到 TTL
+        for (const ref of cardRefs) refs.take(ref)
         warn(`提问卡片发送失败: ${error instanceof Error ? error.message : String(error)}`)
         return null
       }

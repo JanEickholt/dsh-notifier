@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.9.7] - 2026-09-12（codex/pr22-issue23-fix 收口）
+
+入站交互可靠性修复线：Telegram `ask_user` 单选卡片补「自定义回答 / 跳过」按钮并修 ref 泄漏与来源校验缺口（PR #22），QQ 网关心跳时序死循环修复（Issue #23）。`npm test` 为 **1548**（1548 pass，较 0.9.6 基线 1544 净 +4；Telegram/QQ 心跳与点击链 focused 回归 117 + 45 项全绿）。两项修复均为 mock/contract 证据；Issue #23 依据真机 A/B 证据（网关只对 READY/RESUMED 之后的心跳回 ACK）实现，但**未在本代码库重跑真机 soak**——真机验证缺口见 `docs/memory/risks.md`。
+
+### 修复：Telegram ask_user 单选卡片「自定义回答 / 跳过」按钮 + ref 回收与来源校验（PR #22）
+
+- `src/inbound/telegram-bot.mjs` `sendQuestionCard()` 在选项按钮之后追加 `✍️ 自定义回答`（`c`）与 `⏭ 跳过`（`s`）两个辅助按钮，继续沿用 `buildQuestionAction()` 与 `r:<ref>` 短引用链，不另造协议。
+- **引用回收**：本次卡片为选项与两个辅助按钮铸造的全部 callback ref 记录进 `cardRefs`；容量中途耗尽时、辅助按钮铸造失败时、以及 `sendMessage` 抛错/返回失败时，均完整回收本次已铸全部 ref 后降级编号通知，仅真正发送成功才保留 ref 供点击链单次核销（不再泄漏到 TTL）。
+- **来源/token 校验**：`src/questions/router.mjs` `handleCardAction()` 对 custom/skip 分支补 token 有效性（过期/畸形/错签名）、`token.key === qKey`、ledger 存在且 `status === 'pending'`、以及 `(channel, accountId, userId, chatId)` 精确来源匹配（`pushedTo` 中存在 `accountId` 时必须匹配）；来源字段缺失、旧卡、已答、已过期、错误账号/用户/聊天全部 fail-closed 并给出安全提示。custom 只回指引（`答：<内容>`），不直接结算；真正文本回答仍走 `settleText()` / Control Core / `bus.settle` 首达采纳。
+- 修复来源 fail-closed 闸只查 `null`、漏掉 `Array.prototype.find` 返回 `undefined` 的越权放行。
+- 新增 focused regression：错 key token / 过期 token / 已决问题 / 错误 chat / 错误 account 均 fail-closed，正确来源只发指引不结算，随后 `答：` 文本正常落账。
+
+### 修复：QQ 网关心跳时序死循环（Issue #23）
+
+- `src/inbound/qq-gw.mjs`：`OP_HELLO` 只记录本连接的 `heartbeat_interval` 并发送 IDENTIFY/RESUME，**不再立即启动并发送首拍心跳**（真机 A/B 证据：QQ 网关只对鉴权完成、收到 READY/RESUMED 之后发出的心跳回 `OP_HEARTBEAT_ACK`，提前起搏永远收不到 ACK 而死循环）。
+- 心跳起搏拆为 `recordHeartbeatInterval()` + `armHeartbeat()`：收到 `READY` 或 `RESUMED` 后才幂等启动定时器并立即发送第一拍（携带当时最新 `lastSeq`）；重复 READY/RESUMED 不会创建多个定时器或重复首拍。
+- `beat()` 语义修正：上一拍未 ACK 且未达到 `maxMissedAcks` 时记一次 miss、告警，但仍继续发送下一拍（保持恢复路径，不再提前 `return` 卡死）；只有达到阈值才 `cleanupSocket()` 并按既有语义走 RESUME 优先重连，该拍不再发送；收到任意有效 `OP_HEARTBEAT_ACK` 后清零等待与连续 miss 计数。
+- **连接级状态隔离**：`heartbeatIntervalMs`/`heartbeatArmed`/`awaitingAck`/`missedAcks` 均为连接级，`cleanupSocket()` 复位；`connect()` 的 message 监听器按连接身份 `conn` 比对，旧连接迟到 ACK 不再取消已决策重连、也不污染新连接；`stop()` 增补清心跳状态，restart 后能重新正常握手与起搏。
+- 保留现有关闭码分支、退避、token、sessionId、lastSeq 与 fail-safe 行为；未顺手重构其他 QQ 协议代码。
+- 测试：删除「HELLO 后立即心跳」旧契约，新增 HELLO→IDENTIFY-only、READY/RESUMED 才首拍、RESUME→RESUMED 起拍、重复 READY/RESUMED 不双定时器、单拍丢失下一拍仍发、旧连接迟到 ACK 不污染新连接等回归。
+
+### 真机验证缺口
+
+- Issue #23 全部为 mock/contract 证据，未跑新的真机 soak；`docs/memory/risks.md` 登记「自动化验证不等于真机复验」及 4 项待观察点 + 1 项接受的残留（鉴权前 liveness watchdog 移除后，HELLO 后静默挂起依赖 TCP 层超时）。
+- Telegram PR #22 点击链为 contract-tested；真机 Telegram 客户端按钮回调与 `答：` 文本续答未复测。
+
 ## [0.9.6] - 2026-09-12（codex/admin-zero-config-onboarding 收口）
 
 「零配置首访」特性线：安装后不写 YAML——打开终端打印的启动链接，选通知渠道、填凭证、当场收到测试通知；远程控制以后再配。`npm test` 为 **1544**（1544 pass，较 0.9.5 基线 1531 净 +13；`admin-ui-behavior` 套件按新鉴权/向导契约整体重写为 46 项）。
@@ -220,7 +246,24 @@ R1「正确性第一线」修复列车（20 轮审查 80 项清单的第一批 1
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 SemVer。
 DSH 处于 developer preview，0.x 阶段的次版本号提升允许小幅破坏性变更（会在条目中标注）。
 
-## [Unreleased]
+后续已随 [0.9.7] 发布。
+
+### 修复：Telegram ask_user 单选卡片增加「自定义回答 / 跳过」按钮 + ref 回收与来源校验（PR #22，2026-09-12）
+
+- `src/inbound/telegram-bot.mjs` `sendQuestionCard()` 在选项按钮之后追加 `✍️ 自定义回答`（`c`）与 `⏭ 跳过`（`s`）两个辅助按钮，继续沿用 `buildQuestionAction()` 与 `r:<ref>` 短引用链，不另造协议。
+- **引用回收**：本次卡片为选项与两个辅助按钮铸造的全部 callback ref 记录进 `cardRefs`；容量中途耗尽时、辅助按钮铸造失败时、以及 `sendMessage` 抛错/返回失败时，均完整回收本次已铸全部 ref 后降级编号通知，仅真正发送成功才保留 ref 供点击链单次核销（不再泄漏到 TTL）。
+- **来源/token 校验**：`src/questions/router.mjs` `handleCardAction()` 对 custom/skip 分支补 token 有效性（过期/畸形/错签名）、`token.key === qKey`、ledger 存在且 `status === 'pending'`、以及 `(channel, accountId, userId, chatId)` 精确来源匹配（`pushedTo` 中存在 `accountId` 时必须匹配）；来源字段缺失、旧卡、已答、已过期、错误账号/用户/聊天全部 fail-closed 并给出安全提示。custom 只回指引（`答：<内容>`），不直接结算；真正文本回答仍走 `settleText()` / Control Core / `bus.settle` 首达采纳。
+- 修复来源 fail-closed 闸只查 `null`、漏掉 `Array.prototype.find` 返回 `undefined` 的越权放行。
+- 新增 focused regression：错 key token / 过期 token / 已决问题 / 错误 chat / 错误 account 均 fail-closed，正确来源只发指引不结算，随后 `答：` 文本正常落账。
+
+### 修复：QQ 网关心跳时序死循环（Issue #23，2026-09-12）
+
+- `src/inbound/qq-gw.mjs`：`OP_HELLO` 只记录本连接的 `heartbeat_interval` 并发送 IDENTIFY/RESUME，**不再立即启动并发送首拍心跳**（真机 A/B 证据：QQ 网关只对鉴权完成、收到 READY/RESUMED 之后发出的心跳回 `OP_HEARTBEAT_ACK`，提前起搏永远收不到 ACK 而死循环）。
+- 心跳起搏拆为 `recordHeartbeatInterval()` + `armHeartbeat()`：收到 `READY` 或 `RESUMED` 后才幂等启动定时器并立即发送第一拍（携带当时最新 `lastSeq`）；重复 READY/RESUMED 不会创建多个定时器或重复首拍。
+- `beat()` 语义修正：上一拍未 ACK 且未达到 `maxMissedAcks` 时记一次 miss、告警，但仍继续发送下一拍（保持恢复路径，不再提前 `return` 卡死）；只有达到阈值才 `cleanupSocket()` 并按既有语义走 RESUME 优先重连，该拍不再发送；收到任意有效 `OP_HEARTBEAT_ACK` 后清零等待与连续 miss 计数。
+- **连接级状态隔离**：`heartbeatIntervalMs`/`heartbeatArmed`/`awaitingAck`/`missedAcks` 均为连接级，`cleanupSocket()` 复位；`connect()` 的 message 监听器按连接身份 `conn` 比对，旧连接迟到 ACK 不再取消已决策重连、也不污染新连接；`stop()` 增补清心跳状态，restart 后能重新正常握手与起搏。
+- 保留现有关闭码分支、退避、token、sessionId、lastSeq 与 fail-safe 行为；未顺手重构其他 QQ 协议代码。
+- 测试：删除「HELLO 后立即心跳」旧契约，新增 HELLO→IDENTIFY-only、READY/RESUMED 才首拍、RESUME→RESUMED 起拍、重复 READY/RESUMED 不双定时器、单拍丢失下一拍仍发、旧连接迟到 ACK 不污染新连接等回归。
 
 ### 新增：宿主事件根上下文订阅与可观测性（Issue #16，2026-08-26）
 
@@ -483,7 +526,7 @@ QQ 网关心跳 ACK 丢失与 RESUME 恢复路径是批 2 引入的关键韧性�
 
 - `src/questions/router.mjs`：`pushQuestion` 计算 `hintChannels` 时，把「该问题目标用户已绑定、卡片未送达」的交互入站通道一并计入（如 `qq`/`wechat`），编号话术经入站 `sendText` 送达纯入站通道（wechat iLink 无出站文本可走）；已由出站文本送达的通道（同名 type 或别名对 `qq-bot↔qq`）只补通道名不重发，避免同号双发。修复 QQ 官方机器人（`qq-bot` 出站 ↔ `qq` 入站异名）与微信 iLink（inbound-only）场景下 `ask_user` 编号回复完全失效、并落入 conversation 路由污染对话的问题。
 - 安全约束不变：只加目标用户已绑定（`notifyTargets()` 三级解析非空）的通道，话术确实送达才入 `hintChannels`，维持 SEC-2 fail-closed——没收到话术的渠道/用户裸编号仍拒绝并 warn。
-- 测试：`test/questions.test.mjs` 新增 3 用例（QQ 异名命中且不双发、iLink 纯入站 sendText 送达后命中、未绑定目标通道不补入 hintChannels）。镜像侧 885→888；本仓库契约以 Unreleased 计数为准。
+- 测试：`test/questions.test.mjs` 新增 3 用例（QQ 异名命中且不双发、iLink 纯入站 sendText 送达后命中、未绑定目标通道不补入 hintChannels）。镜像侧 885→888；本仓库契约以收口计数为准。
 
 ### 修复：飞书扫码一键建应用适配新版 SDK 协议（PR #9，2026-08-23 自公共镜像接力合入）
 

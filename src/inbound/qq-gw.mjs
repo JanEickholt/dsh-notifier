@@ -179,6 +179,8 @@ export function createQqInbound(options = {}) {
   let stopRequested = false
   let ws = null
   let heartbeatTimer = null
+  let heartbeatIntervalMs = null
+  let heartbeatArmed = false
   let lastSeq = null
   let sessionId = null
   let awaitingAck = false
@@ -217,6 +219,11 @@ export function createQqInbound(options = {}) {
 
   function cleanupSocket() {
     if (heartbeatTimer !== null) { clearTimeout(heartbeatTimer); heartbeatTimer = null }
+    // 连接级心跳运行态复位：断开/重连/cleanup 后不得继承上一连接的脏 arming/ACK/miss 状态。
+    // heartbeatIntervalMs 保留——重连后同一会话的节奏由新连接 HELLO 重新下发（仅作兜底用）。
+    heartbeatArmed = false
+    awaitingAck = false
+    missedAcks = 0
     if (ws !== null) {
       try { ws.removeAllListeners?.() } catch { /* fake/运行时差异 */ }
       try { ws.close() } catch { /* 已关闭 */ }
@@ -271,32 +278,44 @@ export function createQqInbound(options = {}) {
     try { ws.send(JSON.stringify(payload)) ; return true } catch { return false }
   }
 
-  function startHeartbeat(intervalMs) {
-    // 标准模式：每次 beat 检查上一次是否已 ACK；未 ACK 即判死重连（无独立 watchdog，
-    // 间隔本身就是粒度，避免「watchdog 被后续 beat 不断重置」的死穴）。
-    // awaitingAck 是连接级状态：新连接起搏前必须复位，否则上一连接的未确认心跳
-    // 会把新连接的第一拍直接判死（曾导致重连后 RESUME/IDENTIFY 发不出去）。
+  /** Issue #23：HELLO 只记录本连接的 heartbeat_interval，不发送、也不启动心跳。
+   *  真机 A/B 证据：QQ 网关只对 READY/RESUMED 之后发出的心跳回 OP_HEARTBEAT_ACK，
+   *  鉴权完成前起搏只会白耗且永远收不到 ACK，必然走到阈值判死死循环。故此函数
+   *  只落盘 interval 并复位连接级心跳运行态，真正的起搏交给 armHeartbeat()（READY/RESUMED 触发）。 */
+  function recordHeartbeatInterval(intervalMs) {
+    heartbeatIntervalMs = intervalMs
+    heartbeatArmed = false
+    awaitingAck = false
+    missedAcks = 0
+  }
+
+  /** Issue #23：READY/RESUMED 后才幂等启动心跳，并立即发送第一拍（携带当时最新 lastSeq）。
+   *  幂等：重复 READY/RESUMED 不得创建多个定时器或重复首拍。
+   *  单拍丢 ACK 且未达阈值时：记一次 miss、告警、仍发送下一拍（恢复路径不断）。 */
+  function armHeartbeat() {
+    if (heartbeatArmed) return
+    if (heartbeatIntervalMs === null) return
+    heartbeatArmed = true
     awaitingAck = false
     missedAcks = 0
     const beat = () => {
+      if (heartbeatTimer === null) return // 连接已清理，本闭包随旧定时器废弃
       if (awaitingAck) {
         missedAcks += 1
         if (missedAcks < maxMissedAcks) {
           warn(`心跳 ACK 已连续丢失 ${missedAcks}/${maxMissedAcks} 拍（下一拍仍无 ACK 才断线重连）`)
-          return
+        } else {
+          warn(`心跳 ACK 已连续丢失 ${missedAcks}/${maxMissedAcks} 拍，判死主动断开重连`)
+          cleanupSocket()
+          scheduleReconnect({ resume: true })
+          return // 达到阈值：本拍不再发送（清 socket 后经 RESUME 优先重连）
         }
-        warn(`心跳 ACK 已连续丢失 ${missedAcks}/${maxMissedAcks} 拍，判死主动断开重连`)
-        awaitingAck = false
-        missedAcks = 0
-        cleanupSocket()
-        scheduleReconnect({ resume: true })
-        return
       }
       if (!sendFrame({ op: OP_HEARTBEAT, d: lastSeq })) return
       awaitingAck = true
     }
     if (heartbeatTimer !== null) clearTimeout(heartbeatTimer)
-    heartbeatTimer = setInterval(beat, Math.max(50, intervalMs))
+    heartbeatTimer = setInterval(beat, Math.max(50, heartbeatIntervalMs))
     beat()
   }
 
@@ -305,11 +324,13 @@ export function createQqInbound(options = {}) {
       reconnectAttempts = 0
       sessionId = String(d?.session_id ?? '') || null
       warn(`QQ 网关已就绪（session ${sessionId ?? '?'}）`)
+      armHeartbeat() // Issue #23：鉴权完成（READY）后才幂等启动心跳，立即发首拍
       return
     }
     if (t === 'RESUMED') {
       reconnectAttempts = 0
       warn('QQ 网关断线恢复（RESUME 成功，事件不丢）')
+      armHeartbeat() // Issue #23：RESUMED 后同样起搏（幂等，避免重复 READY/RESUMED 建多定时器）
       return
     }
     try {
@@ -440,8 +461,11 @@ export function createQqInbound(options = {}) {
     if (typeof frame?.s === 'number') lastSeq = frame.s
     if (frame.op === OP_HELLO) {
       const intervalMs = Number(frame.d?.heartbeat_interval) || 30000
+      // Issue #23：HELLO 只记录本连接 heartbeat_interval 并发送鉴权，不启动心跳。
+      // 心跳须待 READY/RESUMED 鉴权完成后由 armHeartbeat() 幂等启动（真机 A/B 证据：
+      // 网关只对鉴权完成后的心跳回 OP_HEARTBEAT_ACK，提前起搏永远收不到 ACK 而死循环）。
+      recordHeartbeatInterval(intervalMs)
       sendAuth({ resume: sessionId !== null })
-      startHeartbeat(intervalMs)
       return
     }
     if (frame.op === OP_HEARTBEAT_ACK) {
@@ -479,8 +503,12 @@ export function createQqInbound(options = {}) {
     if (stopRequested) return
     if (WebSocketImpl === undefined) throw new Error('当前运行时无 WebSocket（需要 Node 22+）')
     ws = new WebSocketImpl(url)
+    const conn = ws
     ws.addEventListener('open', () => { /* 等 HELLO */ })
     ws.addEventListener('message', (event) => {
+      // Issue #23：连接级隔离——旧连接（已被 cleanupSocket 置 ws=null 或换成新连接）的
+      // 迟到帧（含 op11 ACK）不得触碰新连接的心跳运行态或 reset 新连接的 awaitingAck。
+      if (ws !== conn) return
       try { handleFrame(typeof event.data === 'string' ? event.data : String(event.data)) } catch (error) {
         warn(`帧处理异常: ${error instanceof Error ? error.message : String(error)}`)
       }
@@ -606,6 +634,11 @@ export function createQqInbound(options = {}) {
       try { await startPromise } catch { /* 启动失败不影响停止 */ }
       if (reconnectTimer !== null) { clearTimeout(reconnectTimer); reconnectTimer = null }
       cleanupSocket()
+      // Issue #23：stop 后复位全部连接级心跳运行态，保证 restart 能重新正常握手与起搏。
+      heartbeatArmed = false
+      heartbeatIntervalMs = null
+      awaitingAck = false
+      missedAcks = 0
       startPromise = null
     },
 

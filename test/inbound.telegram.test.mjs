@@ -145,7 +145,7 @@ test('P1-1 提问卡超长 context：同样截断到 4096 内仍送达（ask_use
   assert.ok(text.includes('（内容过长，已截断）'), '截断标记可见')
   assert.ok(text.startsWith('❓'), '头部标识保留')
   const rows = calls[0].body.reply_markup.inline_keyboard
-  assert.equal(rows.length, 2, '选项按钮行不受截断影响（一选项一行）')
+  assert.equal(rows.length, 4, '选项按钮行不受截断影响（两选项 + 自定义回答 + 跳过）')
 })
 
 test('P1-1 动作卡超长 content：同样截断到 4096 内仍送达（心跳/卡住文案防线）', async () => {

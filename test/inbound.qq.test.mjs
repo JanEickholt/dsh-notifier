@@ -180,7 +180,7 @@ test('握手：HELLO 后发 IDENTIFY（QQBot token + 群私聊|按钮互动 inte
   await rig.inbound.stop()
 })
 
-test('心跳：首拍在 READY 前无序号（d=null 合法）；READY 后下一拍携带最后序号', async () => {
+test('心跳（Issue #23）：HELLO 后只记录间隔并鉴权、绝不发送心跳；READY 后才发首拍且携带最新 lastSeq', async () => {
   const rig = makeRig()
   rig.inbound.start()
   await tick()
@@ -188,21 +188,21 @@ test('心跳：首拍在 READY 前无序号（d=null 合法）；READY 后下一
   ws.serverOpen()
   ws.serverSend({ op: 10, d: { heartbeat_interval: 50 } })
   await tick()
-  const firstBeat = ws.sent.find((frame) => frame.op === 1)
-  assert.ok(firstBeat, 'HELLO 后应立即心跳一次')
-  assert.equal(firstBeat.d, null, '首拍在首个事件前，d 为 null（协议允许）')
-  ws.serverSend({ op: 11 }) // 正常服务端：每拍必 ACK
+  assert.equal(ws.sent.filter((frame) => frame.op === 1).length, 0,
+    'Issue #23：HELLO 后只记 heartbeat_interval 并 IDENTIFY/RESUME，绝不发心跳（网关只对 READY/RESUMED 后心跳回 ACK）')
+  assert.ok(ws.sent.some((frame) => frame.op === 2), 'HELLO 后应发 IDENTIFY')
   ws.serverSend({ op: 0, t: 'READY', s: 2, d: { session_id: 'sess_1' } })
-  await tick(80) // 等下一拍（50ms 间隔）
-  const laterBeat = ws.sent.filter((frame) => frame.op === 1).at(-1)
-  assert.equal(laterBeat.d, 2, 'READY 后心跳携带最后事件序号')
+  await tick()
+  const firstBeat = ws.sent.find((frame) => frame.op === 1)
+  assert.ok(firstBeat, 'READY 后应立即发送首拍心跳')
+  assert.equal(firstBeat.d, 2, '首拍应携带当时最新 lastSeq（READY 帧 s=2）')
   await rig.inbound.stop()
 })
 
 /** 排水所有已入队微任务（mock 定时器下不能等真实超时）。 */
 async function flushMacrotask() { await new Promise((resolve) => setImmediate(resolve)) }
 
-test('修复（mnt 批 2）：心跳 ACK 连续丢失计数——单拍只 warn 不断线，连丢 2 拍才判死重连', async (t) => {
+test('修复（mnt 批 2 + Issue #23）：心跳 ACK 连续丢失计数——单拍只 warn 但下一拍仍发，连丢 2 拍才判死重连', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] })
   try {
     const rig = makeRig()
@@ -210,11 +210,13 @@ test('修复（mnt 批 2）：心跳 ACK 连续丢失计数——单拍只 warn 
     await flushMacrotask()
     const ws = FakeWebSocket.instances.at(-1)
     ws.serverOpen()
-    ws.serverSend({ op: 10, d: { heartbeat_interval: 50 } }) // 服务端从此不再 ACK
+    ws.serverSend({ op: 10, d: { heartbeat_interval: 50 } }) // HELLO：只记录，不起拍
     await flushMacrotask()
-    assert.equal(ws.sent.filter((f) => f.op === 1).length, 1, 'HELLO 后首拍已发且未确认')
-    t.mock.timers.tick(50) // 第 2 拍：第 1 拍未确认 → 丢失计数 1
-    assert.equal(ws.sent.filter((f) => f.op === 1).length, 1, '单拍丢失不重发（等待确认）')
+    ws.serverSend({ op: 0, t: 'READY', s: 1, d: { session_id: 'sess_1' } }) // READY 起拍，服务端从此不再 ACK
+    await flushMacrotask()
+    assert.equal(ws.sent.filter((f) => f.op === 1).length, 1, 'READY 后首拍已发且未确认')
+    t.mock.timers.tick(50) // 第 2 拍：第 1 拍未确认 → 丢失计数 1，且下一拍仍发（Issue #23 恢复路径）
+    assert.equal(ws.sent.filter((f) => f.op === 1).length, 2, '单拍丢失后下一拍仍发送（保持恢复路径，不提前 return）')
     assert.ok(rig.lines.some((l) => l.includes('已连续丢失 1/2')), '第一拍丢失必须出声：' + rig.lines.join(' | '))
     const before = FakeWebSocket.instances.length
     t.mock.timers.tick(50) // 第 3 拍：连丢 2 拍 → 判死断开重连
@@ -222,13 +224,13 @@ test('修复（mnt 批 2）：心跳 ACK 连续丢失计数——单拍只 warn 
     assert.ok(rig.lines.some((l) => l.includes('已连续丢失 2/2') && l.includes('判死')), '判死必须点名丢失计数')
     t.mock.timers.tick(10) // 退避 4ms 重连（reconnectBaseMs=2，首跳 2^1）
     await flushMacrotask()
-    assert.ok(FakeWebSocket.instances.length > before, '连续 2 拍未 ACK 应重连（原实现第 2 拍就断）')
+    assert.ok(FakeWebSocket.instances.length > before, '连续 2 拍未 ACK 应重连')
   } finally {
     t.mock.timers.reset()
   }
 })
 
-test('恢复：单拍丢失后 ACK 及时到达 → 不清零不判死，续发心跳且绝不重连', async (t) => {
+test('恢复（Issue #23）：单拍丢失后 ACK 及时到达 → 清零不判死，续发心跳且绝不重连', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] })
   try {
     const rig = makeRig()
@@ -238,13 +240,15 @@ test('恢复：单拍丢失后 ACK 及时到达 → 不清零不判死，续发�
     ws.serverOpen()
     ws.serverSend({ op: 10, d: { heartbeat_interval: 50 } })
     await flushMacrotask()
-    t.mock.timers.tick(50) // 第 2 拍：丢失计数 1
+    ws.serverSend({ op: 0, t: 'READY', s: 1, d: { session_id: 'sess_1' } })
+    await flushMacrotask()
+    t.mock.timers.tick(50) // 第 2 拍：丢失计数 1（仍发送下一拍）
     assert.ok(rig.lines.some((l) => l.includes('已连续丢失 1/2')))
     ws.serverSend({ op: 11 }) // ACK 迟到但到达 → 计数清零
     await flushMacrotask()
     t.mock.timers.tick(50) // 第 3 拍：未在等待 → 正常续发心跳
     await flushMacrotask()
-    assert.equal(ws.sent.filter((f) => f.op === 1).length, 2, '恢复后继续正常心跳节奏')
+    assert.equal(ws.sent.filter((f) => f.op === 1).length, 3, '恢复后继续正常心跳节奏')
     assert.equal(FakeWebSocket.instances.length, 1, '单拍丢失 + ACK 恢复：绝不重连（抖动不算死）')
   } finally {
     t.mock.timers.reset()
@@ -272,6 +276,8 @@ test('阈值可配：maxMissedAcks=1 保留「单拍即断」旧语义；0/非�
     ws.serverOpen()
     ws.serverSend({ op: 10, d: { heartbeat_interval: 50 } })
     await flushMacrotask()
+    ws.serverSend({ op: 0, t: 'READY', s: 1, d: { session_id: 'sess_1' } }) // Issue #23：READY 才起拍
+    await flushMacrotask()
     const before = FakeWebSocket.instances.length
     t.mock.timers.tick(50) // 第 2 拍：丢失计数 1 == 阈值 → 判死
     await flushMacrotask()
@@ -297,6 +303,8 @@ test('阈值可配：maxMissedAcks=1 保留「单拍即断」旧语义；0/非�
     wsClamp.serverOpen()
     wsClamp.serverSend({ op: 10, d: { heartbeat_interval: 50 } })
     await flushMacrotask()
+    wsClamp.serverSend({ op: 0, t: 'READY', s: 1, d: { session_id: 'sess_1' } }) // Issue #23：READY 才起拍
+    await flushMacrotask()
     const beforeClamp = FakeWebSocket.instances.length
     t.mock.timers.tick(50) // miss#1：0 回落 2 → 不断线
     await flushMacrotask()
@@ -312,6 +320,77 @@ test('阈值可配：maxMissedAcks=1 保留「单拍即断」旧语义；0/非�
 })
 
 // --- Issue #15 回归：RESUME 场景下 ACK 连丢、迟到 ACK、stop 清理 ---
+
+test('Issue #23：RESUME→RESUMED 路径起拍——HELLO 只记间隔，RESUMED 后才发首拍且不重复建定时器', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] })
+  try {
+    const rig = makeRig()
+    rig.inbound.start()
+    await flushMacrotask()
+    const ws = FakeWebSocket.instances.at(-1)
+    ws.serverOpen()
+    ws.serverSend({ op: 10, d: { heartbeat_interval: 50 } })
+    await flushMacrotask()
+    assert.equal(ws.sent.filter((f) => f.op === 1).length, 0, 'HELLO 后（即使 RESUME 路径）不发心跳')
+    ws.serverSend({ op: 0, t: 'RESUMED', s: 7, d: {} })
+    await flushMacrotask()
+    const firstBeat = ws.sent.find((f) => f.op === 1)
+    assert.ok(firstBeat, 'RESUMED 后应立即发送首拍')
+    assert.equal(firstBeat.d, 7, 'RESUMED 首拍应携带最新 lastSeq')
+    // 重复 RESUMED 不得产生双定时器：推进一个间隔，心跳帧数只按单定时器节奏增长
+    ws.serverSend({ op: 0, t: 'RESUMED', s: 8, d: {} })
+    await flushMacrotask()
+    ws.serverSend({ op: 11 }) // 清 ACK
+    t.mock.timers.tick(50)
+    ws.serverSend({ op: 11 })
+    t.mock.timers.tick(50)
+    ws.serverSend({ op: 11 })
+    t.mock.timers.tick(50)
+    await flushMacrotask()
+    // 若双定时器，每 tick 会发 2 拍；单定时器下 3 个 tick 仅 3 拍 + 首拍 = 4 拍
+    assert.equal(ws.sent.filter((f) => f.op === 1).length, 4, '重复 RESUMED 不得建双定时器（心跳帧数不翻倍）')
+  } finally {
+    t.mock.timers.reset()
+  }
+})
+
+test('Issue #23：重复 READY 不产生双定时器/重复首拍，且旧连接迟到 ACK 不污染新连接', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] })
+  try {
+    const rig = makeRig()
+    rig.inbound.start()
+    await flushMacrotask()
+    const ws1 = FakeWebSocket.instances.at(-1)
+    ws1.serverOpen()
+    ws1.serverSend({ op: 10, d: { heartbeat_interval: 50 } })
+    await flushMacrotask()
+    ws1.serverSend({ op: 0, t: 'READY', s: 1, d: { session_id: 'sess_x' } })
+    await flushMacrotask()
+    ws1.serverSend({ op: 0, t: 'READY', s: 2, d: { session_id: 'sess_x' } }) // 重复 READY
+    await flushMacrotask()
+    assert.equal(ws1.sent.filter((f) => f.op === 1).length, 1, '重复 READY 不得重复首拍')
+    // 断线重连，旧连接在重连后才到 ACK
+    ws1.serverClose()
+    await flushMacrotask()
+    t.mock.timers.tick(10)
+    await flushMacrotask()
+    const ws2 = FakeWebSocket.instances.at(-1)
+    ws2.serverOpen()
+    ws2.serverSend({ op: 10, d: { heartbeat_interval: 50 } })
+    await flushMacrotask()
+    ws1.serverSend({ op: 11 }) // 旧连接迟到 ACK：不得影响新连接
+    await flushMacrotask()
+    ws2.serverSend({ op: 0, t: 'RESUMED', s: 9, d: {} })
+    await flushMacrotask()
+    const beatBefore = ws2.sent.filter((f) => f.op === 1).length
+    t.mock.timers.tick(50) // 新连接第 1 拍无 ACK → missed=1（不判死）
+    await flushMacrotask()
+    assert.equal(FakeWebSocket.instances.length, 2, '旧连接迟到 ACK 不得阻止已决策重连，也不得让新连接首拍被判死')
+    assert.equal(ws2.sent.filter((f) => f.op === 1).length, beatBefore + 1, '新连接独自按节奏起拍')
+  } finally {
+    t.mock.timers.reset()
+  }
+})
 
 test('Issue #15 回归：ACK 连丢后重连走 RESUME（携带原 session_id 与 seq）', async (t) => {
   // 场景：连续 ACK 丢失触发判死重连 → 重连后应发 RESUME 而非 IDENTIFY

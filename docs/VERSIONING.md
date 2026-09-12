@@ -51,10 +51,13 @@ Two repositories exist with different jobs:
 - `THEWOLFWALKER/dsh-notifier-dev` — private canonical dev workspace (branch `main` + `codex/*`). Engineered and authored here.
 - `THEWOLFWALKER/dsh-notifier` — public release/source mirror (branch `main`). Read-only reference for consumers; never develop here.
 
-The public mirror is a *filtered* snapshot, not a byte-for-byte copy. Engineering-only files stay in dev:
+The public mirror is a *filtered* snapshot, not a byte-for-byte copy. The filter boundary (owner rule, 2026-09-12):
 
-- Always excluded: `.agents/` (including the frontend-design / impeccable / hallmark / taste / ui-ux-pro-max skills and `neat-freak`), `.claude/ .codex/ .opencode/` pointer dirs, engineering-notes only files (`HANDOFF.md`, `ADAPTER.md`, workstream debris), `package-lock.json`, secrets/state/logs.
-- Always kept: `src/ test/ scripts/`, `package.json`, `README.md` + `README.zh-CN.md` (with the console screenshot previews), `CHANGELOG.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `PLUGINS.md`, `cordis.patch.yml`, `docs/guide.md` + `docs/upgrade-guide*.md` + `docs/VERSIONING.md` + `docs/OPERATIONS.md` + `docs/screenshots/` (README references it), `.github/workflows/ci.yml`.
+- `.agents/` is project-level collaboration knowledge (skills, workstreams, references) — **it is public-mirror content and must be synced to the mirror**. Do not treat it as an engineering-only directory.
+- `.opencode/`, `.codex/`, `.claude/` are tool-specific or personal agent pointer/config dirs — **always excluded from the mirror** (and from any future tool config dir).
+- Also excluded from the mirror: `package-lock.json`, secrets/state/logs, `node_modules/`, generated local artifacts, and temporary workstream debris.
+- The npm payload is governed independently by `package.json.files`: `.agents/` staying in the mirror does NOT put `.agents/` into the npm archive. Keep agent/tool directories out of `package.json.files`.
+- Everything else (`src/ test/ scripts/`, `package.json`, `README.md` + `README.zh-CN.md`, `CHANGELOG.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `PLUGINS.md`, `cordis.patch.yml`, `docs/`, `HANDOFF.md`, `ADAPTER.md`, `.github/workflows/ci.yml`) syncs as-is.
 
 The npm payload (`package.json.files`) is smaller still and independent of the mirror.
 

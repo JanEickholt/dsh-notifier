@@ -1538,6 +1538,68 @@ test('P1 跳过经 Control Core：QQ 群聊回调 fail-closed（group_chat_disab
   rig.bridge.dispose()
 })
 
+// PR #22：custom 按钮必须先校验 token/ledger/来源，只发指引不结算。
+test('PR #22 custom 按钮：token 校验通过且来源匹配才发指引；错 key/过期/已决/错误来源均 fail-closed', async () => {
+  const rig = makeControlRig({ channel: 'telegram', accountId: 'tg-acc', chatId: '900113', userId: 'u1' })
+  const p = rig.bridge.askQuestions({ questions: [SINGLE] })
+  await sleep(30)
+  const qKey = rig.store.keys('aq:')[0]
+  const goodToken = rig.vault.mint(qKey)
+  const wrongKeyToken = rig.vault.mint('aq:other:0')
+  // 用新 vault 铸过期 token（同一 secret 保证 verify 不失败在签名上）
+  const expiredVault = createTokenVault({ secret: 'ctrl-test-secret', ttlMs: 1 })
+  const expiredToken = expiredVault.mint(qKey)
+  await sleep(5) // 让过期 token 过期
+
+  // 1) 错误 key token
+  rig.bus.accept({ channel: 'telegram', accountId: 'TG_APP', userId: 'u1', chatId: '900113', accountId: 'tg-acc', chatType: 'private', messageId: 'm-wrongkey', questionAction: { qKey, optIdx: 'c', token: wrongKeyToken } })
+  assert.match(rig.texts.at(-1).text, /问题不匹配/)
+  assert.equal(rig.store.get(qKey).status, 'pending')
+
+  // 2) 过期 token
+  rig.bus.accept({ channel: 'telegram', accountId: 'TG_APP', userId: 'u1', chatId: '900113', accountId: 'tg-acc', chatType: 'private', messageId: 'm-expired', questionAction: { qKey, optIdx: 'c', token: expiredToken } })
+  assert.match(rig.texts.at(-1).text, /已过期/)
+  assert.equal(rig.store.get(qKey).status, 'pending')
+
+  // 3) 错误 chat → router 在委托 Control Core 之前先做 pushedTo 来源校验，fail-closed
+  rig.bus.accept({ channel: 'telegram', accountId: 'TG_APP', userId: 'u1', chatId: '900114', accountId: 'tg-acc', chatType: 'private', messageId: 'm-wrongchat', questionAction: { qKey, optIdx: 'c', token: goodToken } })
+  assert.match(rig.texts.at(-1).text, /请到原会话操作/)
+  assert.equal(rig.store.get(qKey).status, 'pending')
+
+  // 4) 错误 account（同 user 同 chat，accountId 不同）→ router 层 fail-closed
+  rig.bus.accept({ channel: 'telegram', accountId: 'TG_APP', userId: 'u1', chatId: '900113', accountId: 'tg-evil', chatType: 'private', messageId: 'm-evilacc', questionAction: { qKey, optIdx: 'c', token: goodToken } })
+  assert.match(rig.texts.at(-1).text, /请到原会话操作/)
+  assert.equal(rig.store.get(qKey).status, 'pending')
+
+  // 5) 正确来源 → 只发指引，不结算
+  rig.bus.accept({ channel: 'telegram', accountId: 'TG_APP', userId: 'u1', chatId: '900113', accountId: 'tg-acc', chatType: 'private', messageId: 'm-guide', questionAction: { qKey, optIdx: 'c', token: goodToken } })
+  assert.match(rig.texts.at(-1).text, /自定义回答：直接回复「答：/)
+  assert.equal(rig.store.get(qKey).status, 'pending', 'custom 指引不结算')
+
+  // 6) 按指引文本回答 → 正常结算
+  rig.bus.accept({ channel: 'telegram', accountId: 'TG_APP', userId: 'u1', chatId: '900113', accountId: 'tg-acc', chatType: 'private', messageId: 'm-answer', text: '答：我选预发' })
+  const result = await p
+  assert.equal(result.answered, true)
+  assert.deepEqual(result.results[0].answers, ['我选预发'])
+  rig.bridge.dispose()
+})
+
+test('PR #22 custom 按钮：已决问题点击 fail-closed', async () => {
+  const rig = makeControlRig({ channel: 'telegram', accountId: 'tg-acc', chatId: '900113', userId: 'u1' })
+  const p = rig.bridge.askQuestions({ questions: [SINGLE] })
+  await sleep(30)
+  const qKey = rig.store.keys('aq:')[0]
+  const token = rig.vault.mint(qKey)
+  // 先跳过使问题已决
+  rig.bus.accept({ channel: 'telegram', accountId: 'TG_APP', userId: 'u1', chatId: '900113', accountId: 'tg-acc', chatType: 'private', messageId: 'm-skip', questionAction: { qKey, optIdx: 's', token } })
+  await p
+  assert.equal(rig.store.get(qKey).status, 'resolved')
+  // 再点 custom
+  rig.bus.accept({ channel: 'telegram', accountId: 'TG_APP', userId: 'u1', chatId: '900113', accountId: 'tg-acc', chatType: 'private', messageId: 'm-after', questionAction: { qKey, optIdx: 'c', token } })
+  assert.match(rig.texts.at(-1).text, /该提问已回答或已过期/)
+  rig.bridge.dispose()
+})
+
 test('P1 自定义答 replay/去重：同 messageId 重复入站不重复结算，账本只记一次', async () => {
   const rig = makeControlRig({ channel: 'telegram', accountId: 'tg-acc', chatId: '900113', userId: 'u1' })
   const p = rig.bridge.askQuestions({ questions: [SINGLE] })

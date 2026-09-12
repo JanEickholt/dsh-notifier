@@ -1,0 +1,79 @@
+# dsh-notifier Agent Rules
+
+## Source Of Truth
+
+- Runtime truth is the tracked source under `src/` and its tests under `test/`.
+- `package.json` is the package and version authority.
+- `README.md` and `README.zh-CN.md` are user-facing entry points.
+- `HANDOFF.md` is the detailed engineering snapshot; do not copy it into this file.
+- `docs/KNOWLEDGE_BASE.md` is the documentation map. `docs/memory/` contains concise durable facts, not a second implementation spec.
+- Tracked `.agents/` workstreams and `docs/memory/` are the only collaboration-state authority; chat messages are not durable project state. Runtime truth remains `src/` and `test/`.
+- The npm package archive is an output. It never overrides the engineering tree.
+- Every task completion or milestone handoff must read and execute the project-local `.agents/skills/neat-freak/SKILL.md` checklist before the final response. Its canonical copy lives under `.agents/skills/neat-freak/`; tool-specific skill directories contain pointers only.
+- Private-development/public-release split: the private canonical Git remote is the only serial relay workspace; `https://github.com/THEWOLFWALKER/dsh-notifier` is the public release/source mirror. Do not develop from the public mirror.
+
+## Hard Boundaries
+
+- Preserve the zero-runtime-dependency design: use platform `fetch`, `node:*`, and native WebSocket; optional dependencies stay optional and lazy-loaded.
+- A failed or missing notification channel must not break startup or other channels.
+- Every listener and assembly block is defensive: catch failures, log through the host logger and stderr where diagnostics matter.
+- Approval, action, and question paths are fail-closed: timeout, malformed input, invalid token, wrong source, or any exception must return control to the desktop; silence never approves.
+- Inbound access is denied by default. Identity is a `(channel, userId)` binding, not a global user string.
+- Tokens are single-use and time-limited. A callback or reply must be scoped to its original channel/chat when the record carries source metadata.
+- State writes must preserve unrelated keys, use the existing store locking/merge behavior, and never expose credentials in logs or API responses.
+- The admin server binds to `127.0.0.1` only. Never weaken this in a convenience change.
+- Behavior changes require focused tests, a full `npm test`, and a CHANGELOG entry with the review/security reason when applicable.
+- Real HTTP shape, payload length, callback limits, and long-running connections require real-device or protocol-level validation; mocked fetch alone is insufficient.
+
+## Product And Engineering Principles
+
+- Start from the user's job and first-principles failure modes; prioritize a reliable, understandable workflow over feature count.
+- Favor mature, composable capabilities and progressive disclosure. Keep the interface simple, calm, responsive, accessible, and friendly; expose complexity only when the user needs it.
+- Every task begins with a written plan covering scope, affected files, risks, and validation. Do not make unplanned edits, speculative abstractions, or roadmap work disguised as cleanup.
+- Use the mandatory loop: plan -> implement -> adversarial review -> revise -> focused tests -> full validation. A change is not complete until review findings are fixed or explicitly recorded.
+- Preserve maintainable boundaries: prefer existing contracts and local patterns, keep modules cohesive, and choose the smallest durable design that leaves a clear path for future growth.
+- Any sub-agent console or admin GUI must inherit the existing DSH visual language and interaction patterns from `src/admin/ui.mjs`; do not introduce a separate product style or competing navigation model.
+- Long-term plans describe staged outcomes and decision points, not speculative features. Implement only the smallest slice that proves user value and keeps later options open.
+
+## Working Tree And Branches
+
+- Start every task with `git status --short --branch` and `git log --oneline -5`.
+- Work on `codex/<topic>` branches. Do not develop directly on `main` or `master`.
+- Keep the first baseline commit immutable. Group each follow-up by one logical concern.
+- Do not mix source, release metadata, and unrelated cleanup in one commit.
+- Before handoff, the working tree must be clean, the branch must identify its purpose, and the final commit list must be reported.
+- Relay handoff cadence: every agent completion must commit and push before leaving a machine, update its detailed `.agents/workstreams/<topic>.md` identity/status/tests/review/commit record, and refresh the current handoff snapshot in `HANDOFF.md`. Do not append chat transcripts; consolidate the snapshot so it stays readable.
+- Never commit `node_modules/`, `package-lock.json`, credentials, state files, `.log` files, or generated local artifacts.
+- Release packing must never include development-tool directories: `.claude/`, `.codex/`, `.opencode/` (and any future agent config), or the npm payload would expose personal tool config. Keep these out of `package.json.files` and the npm archive. The npm payload boundary is independent of the mirror boundary: tracked `.agents/` (project collaboration knowledge) syncs to the public mirror but stays out of the npm archive — see `docs/VERSIONING.md`.
+
+## Multi-Agent Protocol
+
+- Read `docs/KNOWLEDGE_BASE.md` and `docs/memory/README.md` before editing.
+- Reserve a workstream by creating one file under `.agents/workstreams/` from `TEMPLATE.md`. Each agent owns its file and must not edit another agent's reservation.
+- Agents may edit disjoint files in parallel. If two tasks touch the same file, the later task must rebase its reasoning on the current file rather than overwrite it.
+- Every workstream records scope, files, tests, and handoff notes. Mark it `done` before the agent exits; keep only durable records, not chat transcripts.
+- Prefer narrow commits. The parent agent integrates commits after checking `git diff`, tests, and version guards.
+
+## Validation
+
+```text
+npm test
+node scripts/verify-release.mjs
+node scripts/gen-channel-matrix.mjs --check
+node --check src/index.mjs
+```
+
+For a channel change, also run the relevant adapter contract test and `node scripts/channel-selfcheck.mjs` with safe test credentials when available. For inbound changes, use the matching `test/inbound.*.test.mjs` suite and record any real-device gap in `docs/memory/risks.md`.
+
+## Deep References
+
+| Need | Read |
+|---|---|
+| Project map and source hierarchy | `docs/KNOWLEDGE_BASE.md` |
+| Stable architecture and state flows | `docs/architecture.md` |
+| Local operation and troubleshooting | `docs/OPERATIONS.md` and `docs/guide.md` |
+| Version/release anti-split rules | `docs/VERSIONING.md` |
+| Durable facts and decisions | `docs/memory/` |
+| Existing detailed handoff | `HANDOFF.md` |
+| Adapter contribution contract | `ADAPTER.md` |
+| Plugin consumer contract | `PLUGINS.md` |

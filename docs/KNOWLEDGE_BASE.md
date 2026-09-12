@@ -4,8 +4,8 @@
 
 ## 当前基线
 
-- 当前发布线：`codex/fix-outbound-delivery`，包版本字段 `0.9.5`（R1–R5 修复列车已收口）；公共 GitHub 源码镜像（`main`）已推送 v0.9.5，npm registry `latest` 仍为 `0.9.0`（待发布）。
-- 当前测试：`1531`（1531 pass，R5 收口基线）。历史 npm `0.8.6` 契约为 909、`0.9.0` 为 1352；按版本区分。
+- 当前发布线：`codex/pr22-issue23-fix`，包版本字段 `0.9.7`（Telegram PR #22 + QQ Issue #23 修复已发布 2026-09-12）；公共 GitHub 源码镜像（`main`）已同步 v0.9.7，npm registry `latest` 为 `0.9.7`。
+- 当前测试：`1548`（1548 pass，v0.9.7 发布基线）。历史 npm `0.8.6` 契约为 909、`0.9.0` 为 1352、v0.9.5 为 1531、v0.9.6 为 1544；按版本区分。
 - 私有 `dsh-notifier-dev` 是工程协作仓库；公共 GitHub 仓库只是发布/源码镜像。
 - 生态收录：公开仓库描述/发现主题已按 v0.9.0 更新；Awesome DSH PR #3490 已提交，dshfind 等待下一轮目录同步。
 - Node.js ESM、Node `>=22`、无生产依赖、无构建步骤；27 个出站渠道，Telegram/Feishu/QQ Bot/WxPusher/WeChat iLink/DingTalk 六个入站控制通道。

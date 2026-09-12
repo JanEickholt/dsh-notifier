@@ -425,20 +425,28 @@ export function createQuestionBridge(deps) {
     const optIdx = String(action.optIdx ?? '')
     const inbound = interactiveEntries().find((entry) => entry.channel === envelope.channel)
     const feedback = (text) => { if (inbound !== undefined) void inbound.sendText(envelope.chatId, text).catch(() => {}) }
-    if (optIdx === 'c' || optIdx === 'custom') {
-      feedback('✍️ 自定义回答：直接回复「答：<你的回答>」')
-      return true
-    }
-    if (optIdx === 's' || optIdx === 'skip') {
+    // PR #22：自定义回答与跳过按钮必须校验 token、ledger 与原始来源，
+    // 否则过期/错 key/旧卡/错误聊天点击会误导用户或造成越权。
+    if (optIdx === 'c' || optIdx === 'custom' || optIdx === 's' || optIdx === 'skip') {
+      const isCustom = optIdx === 'c' || optIdx === 'custom'
       const tokenVerdict = vault.verify(String(action.token ?? ''))
-      if (!tokenVerdict.ok || tokenVerdict.key !== qKey) { feedback('作答被拒绝（校验失败）'); return true }
+      if (!tokenVerdict.ok) {
+        feedback(`作答被拒绝（${tokenVerdict.reason === 'expired' ? '已过期' : '校验失败'}）`)
+        return true
+      }
+      if (tokenVerdict.key !== qKey) { feedback('作答被拒绝（问题不匹配）'); return true }
       const row = ledger.get(qKey)
       if (row === undefined || row.status !== 'pending') { feedback('该提问已回答或已过期'); return true }
       const sourceChat = envelope.chatId !== undefined && envelope.chatId !== null ? String(envelope.chatId) : ''
-      // aq-skip 也纳入 accountId 的来源绑定：同一 chat/user 但不同账号（multi-account 同聊天）
-      // 不得凭 userId 单独命中——pushedTo 只计与事件账号一致的目标，否则 fail-closed 原会话。
+      // 来源精确匹配：channel / chatId / userId，存在 accountId 时也必须匹配。
+      // 多账号同聊天场景不得凭 userId 单独命中——pushedTo 只计与事件账号一致的目标。
       const target = Array.isArray(row.pushedTo) ? row.pushedTo.find((item) => String(item.channel) === String(envelope.channel) && String(item.chatId) === sourceChat && (item.accountId === undefined || String(item.accountId) === String(envelope.accountId ?? '')) && String(item.userId) === String(envelope.userId)) : null
-      if (target === null || sourceChat === '') { feedback('请到原会话操作'); return true }
+      if (target === null || target === undefined || sourceChat === '') { feedback('请到原会话操作'); return true }
+      // 自定义回答只展示指引，不直接结算；真正文本回答继续走 settleText / Control Core / bus.settle。
+      if (isCustom) {
+        feedback('✍️ 自定义回答：直接回复「答：<你的回答>」')
+        return true
+      }
       // 跳过一律经共享 Control Core 的 question-answer 契约裁决（授权/来源/策略/群聊 fail-closed），
       // 结算走 settleSkip（仍以 bus.settle 首达采纳为唯一落账点）。控制缺失 → fail-closed：
       // 绝不直结（不再回退 bus.settle），防止无授权即放行跳过。
@@ -964,7 +972,7 @@ export function createQuestionBridge(deps) {
     escalation.dispose()
   }
 
-  return { askQuestions, decide, decideTrusted, adminPending, adminSettle, attach, dispose }
+  return { askQuestions, decide, decideTrusted, adminPending, adminSettle, attach, dispose, handleCardAction }
 }
 
 /** 校验并归一 ask_user 工具参数；违规返回 { ok:false, reason }。 */

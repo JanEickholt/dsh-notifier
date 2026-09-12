@@ -13,7 +13,7 @@
 ![渠道](https://img.shields.io/badge/channels-27-00B4D8?style=flat-square)
 
 ![npm version](https://img.shields.io/npm/v/dsh-notifier?style=flat-square&logo=npm&logoColor=white)
-![tests](https://img.shields.io/badge/tests-1544-brightgreen?style=flat-square)
+![tests](https://img.shields.io/badge/tests-1548-brightgreen?style=flat-square)
 ![license](https://img.shields.io/badge/license-MIT-brightgreen?style=flat-square)
 ![awesome-dsh-plugin](https://img.shields.io/badge/awesome--dsh--plugin-%E5%AE%98%E6%96%B9%E6%94%B6%E5%BD%95-00B4D8?style=flat-square)
 ![omdsh workshop](https://img.shields.io/badge/omdsh-workshop-7C3AED?style=flat-square)
@@ -25,7 +25,7 @@
 ![沉默](https://img.shields.io/badge/%E6%B2%89%E9%BB%98-%E6%B0%B8%E4%B8%8D%E6%89%B9%E5%87%86-9C27B0?style=flat-square)
 ![推送](https://img.shields.io/badge/push%20it-real%20good-FF4081?style=flat-square)
 
-包元数据：`dsh-notifier@0.9.6` · 1544 个自动化契约测试（1544 通过）· MIT 许可。
+包元数据：`dsh-notifier@0.9.7` · 1548 个自动化契约测试（1548 通过）· MIT 许可。
 
 把 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) agent 带到你平时使用的地方。dsh-notifier 用一个极简 `notify()` API 接住 27 个渠道，再提供手机审批、手机提问、会话控制和清爽的本机管理台——无需额外部署第二套运行时。
 
@@ -95,7 +95,7 @@ dsh plugin add dsh-notifier --profile <profile-name>
 | **分级路由** | `timeSensitive` / `active` / `passive` → 各渠道原生送达语义（静默推送、优先级标头、@提醒），配分档重试。 |
 | **远程审批** | 手机上回答审批 —— Telegram/飞书卡片、QQ 单聊原生按钮，以及无卡片渠道的编号回复兜底；群聊目标使用安全文本回退。沉默永不批准。 |
 | **远程会话** | 与 agent 对话：纯文本 → `followup`/`inject`，`!` 前缀中途纠偏，合并窗拼回手机碎片输入。 |
-| **远程提问**（v0.8.0） | 模型在手机上向你发起选择题：1-4 题 × 2-5 选项（支持多选）。飞书 / Telegram 及 QQ C2C 单聊推选项卡片；其他目标自动使用安全的编号回复兜底；答错可重答、问题不作废；超时永不代答。与审批同一信任链（HMAC 一次性 token、首达采纳、30s/60s 催办）。本机 Web 管理台提供脱敏待处理问题列表，并经 Control Core 进行 choose/reject 结算。 |
+| **远程提问**（v0.8.0） | 模型在手机上向你发起选择题：1-4 题 × 2-5 选项（支持多选）。飞书 / Telegram 及 QQ C2C 单聊推选项卡片；Telegram 单选卡片另带 ✍️ 自定义回答与 ⏭ 跳过按钮（来源/token 校验、首达采纳）；其他目标自动使用安全的编号回复兜底；答错可重答、问题不作废；超时永不代答。与审批同一信任链（HMAC 一次性 token、首达采纳、30s/60s 催办）。本机 Web 管理台提供脱敏待处理问题列表，并经 Control Core 进行 choose/reject 结算。 |
 | **移动指挥中心**（v0.5.0） | 长任务心跳（默认 15min 起）与疑似卡住提醒（默认 10min 无事件）；Telegram / 飞书卡片自带 ⏹ 停止按钮（HMAC 一次性 token，与审批同一信任链）；`/quiet`·`/unquiet` 在手机上静默/恢复会话推送。 |
 | **开放事件源**（v0.6.0） | 其他插件经 `notifier` 服务推送（`ctx.inject(['notifier'], …)`——共享配置、路由、账本、限流、flush），并可 `ctx.on('dsh-notifier/sent')` 订阅投递元数据。广播与定向推送各产生一次审计事件，事件绝不暴露正文；按源独立限流（默认 10/分钟）、2 万码点钳制、永不 reject 的 API；消费方契约见 [PLUGINS.md](PLUGINS.md)。 |
 | **身份体系**（v0.7.0） | 「谁能驱动入站」成为运行时对象：配对码准入（任意通道私聊 `/pair <码>`，首位核销者成为 owner）、复合键绑定（`channel:userId`——TG 绑定的 id 不再放行飞书消息）、角色管理（末位 owner 不可删不可降）、拒绝回执（未绑定者收到含自身身份与配对指引的回执）。空白名单引导态启动（bootstrap 码写本机 0600 文件 `<stateDir>/bootstrap-paircode.txt`，日志只印路径不印码面），不再拒绝启动。**从安装到日常使用的完整指南见 [docs/guide.md](docs/guide.md)**。 |
@@ -221,7 +221,7 @@ src/
   ledger.mjs          JSONL 账本 + 每日摘要
   rules.mjs           防打扰闸门（事件 / 关键词 / 宽限窗）
 scripts/              channel-login.mjs · channel-selfcheck.mjs · route.mjs · gen-channel-matrix.mjs
-test/                 1544 个测试（1544 通过，0.9.6 发布线）；历史 0.8.6 包为 909 个测试。
+test/                 1548 个测试（1548 通过，0.9.7 发布线）；历史 0.8.6 包为 909 个测试。
 ```
 
 设计准则：纯 ESM（`.mjs`）、零运行时依赖、绝大多数渠道走声明式 spec 引擎、适配器薄而诚实、无构建步骤。
@@ -240,7 +240,7 @@ test/                 1544 个测试（1544 通过，0.9.6 发布线）；历史
 > 进行活跃开发与贡献请使用私有开发仓库 `THEWOLFWALKER/dsh-notifier-dev`。本公开镜像只是发布/源码快照——请勿在此开发。
 
 ```bash
-npm test          # 0.9.6 发布线：1544（1544 通过）
+npm test          # 0.9.7 发布线：1548（1548 通过）
 ```
 
 新增渠道：在 `src/adapters/` 实现适配器接口（`resolve(cfg)` + `send(msg)`），并在 `src/config.mjs` 注册；上方渠道矩阵由 `node scripts/gen-channel-matrix.mjs` 自动重生成。
