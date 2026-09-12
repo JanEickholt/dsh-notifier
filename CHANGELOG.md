@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]（codex/notification-lang-setting）
+
+新增配置项 `lang: 'zh' | 'en'`（默认 zh，零行为变化）：自动推送文案（turn/end · approval/asked · agent/error · longRunning/stall 的 headline 与自有 detail/正文模板）改为从 `src/strings.mjs` 文案表取词，`lang: 'en'` 时输出英文。助手摘录、错误原文等宿主数据片段不翻译（它们本就是会话语言）；账本晨报（`ledger.mjs`）与 `notify` 工具描述不在本次范围。非法 `lang` 值回落 zh（与 `redaction` 归一化同法）。文案表中 zh 条目与 0.9.7 硬编码逐字节一致。
+
+- `src/strings.mjs`（新增）：zh/en 双语文案表 + `stringsOf(lang)`（未知值回落 zh）。
+- `src/config.mjs`：`resolveConfig` 归一化 `lang`（仅接受 `'en'`，其余回落 `'zh'`）。
+- `src/event-listener.mjs`：`TURN_END_META` 只留级别，headline/detail 取自文案表；`intentOfSessionEvent` / `intentOfAgentError` 增加可选 `strings` 参数（缺省 zh，既有调用方零感知）；`composeStatusBody`、longRunning/stall headline、turn/start headline 走文案表。
+- 测试：`test/lang-strings.test.mjs` 6 项 focused（默认逐字节一致 / en 切换 / 未知回落 / 错误原文不翻译 / titlePrefix 组合）；全量 `npm test` 1554 pass（1548 基线 + 6）。README 测试计数基线按 train close 惯例不动。
+
 ## [0.9.7] - 2026-09-12（codex/pr22-issue23-fix 收口）
 
 入站交互可靠性修复线：Telegram `ask_user` 单选卡片补「自定义回答 / 跳过」按钮并修 ref 泄漏与来源校验缺口（PR #22），QQ 网关心跳时序死循环修复（Issue #23）。`npm test` 为 **1548**（1548 pass，较 0.9.6 基线 1544 净 +4；Telegram/QQ 心跳与点击链 focused 回归 117 + 45 项全绿）。两项修复均为 mock/contract 证据；Issue #23 依据真机 A/B 证据（网关只对 READY/RESUMED 之后的心跳回 ACK）实现，但**未在本代码库重跑真机 soak**——真机验证缺口见 `docs/memory/risks.md`。
