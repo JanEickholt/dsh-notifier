@@ -44,6 +44,43 @@ Restart DSH and verify the UI version, startup assembly markers, one outbound te
 
 The repository archive may include contributor-only files such as `HANDOFF.md`, `ADAPTER.md`, design notes, screenshots, and CI. The npm package intentionally excludes those. Compare manifests and hashes before release, but do not make the npm archive the source of truth.
 
+## Dev → Public Mirror Release Flow
+
+Two repositories exist with different jobs:
+
+- `THEWOLFWALKER/dsh-notifier-dev` — private canonical dev workspace (branch `main` + `codex/*`). Engineered and authored here.
+- `THEWOLFWALKER/dsh-notifier` — public release/source mirror (branch `main`). Read-only reference for consumers; never develop here.
+
+The public mirror is a *filtered* snapshot, not a byte-for-byte copy. Engineering-only files stay in dev:
+
+- Always excluded: `.agents/` (including the frontend-design / impeccable / hallmark / taste / ui-ux-pro-max skills and `neat-freak`), `.claude/ .codex/ .opencode/` pointer dirs, engineering-notes only files (`HANDOFF.md`, `ADAPTER.md`, workstream debris), `package-lock.json`, secrets/state/logs.
+- Always kept: `src/ test/ scripts/`, `package.json`, `README.md` + `README.zh-CN.md` (with the console screenshot previews), `CHANGELOG.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `PLUGINS.md`, `cordis.patch.yml`, `docs/guide.md` + `docs/upgrade-guide*.md` + `docs/VERSIONING.md` + `docs/OPERATIONS.md` + `docs/screenshots/` (README references it), `.github/workflows/ci.yml`.
+
+The npm payload (`package.json.files`) is smaller still and independent of the mirror.
+
+Recommended publish procedure (do not develop in the mirror):
+
+```text
+# 1. dev main must be green and clean
+git status --short --branch        # clean
+npm test
+node scripts/verify-release.mjs
+node scripts/gen-channel-matrix.mjs --check
+
+# 2. refresh a filtered staging clone of the public mirror
+#    (copy from dev, excluding the engineering-only files above)
+
+# 3. in the staging copy: sanity-check the README screenshots resolve
+git status --short
+git diff -- name-only            # review what moved
+git commit -am "release: sync dev main to <version>" 
+
+# 4. push the filtered snapshot to the public mirror main
+git push origin main
+```
+
+Keep the public `main` pointer pinned to reviewed dev `main`. Never force-push over published history; if drift appears, reconcile from dev `main` forward.
+
 ## Version Bump Checklist
 
 - Update `package.json.version`.

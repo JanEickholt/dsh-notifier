@@ -46,3 +46,36 @@ QQ single-chat native buttons, QQ group text fallback, and QQ/WeChat iLink/DingT
 ## Release Smoke Test
 
 Before publishing, use a clean checkout or clean working tree, run `npm test`, run the release guard, regenerate the channel matrix in check mode, and compare the generated package manifest with the repository files. Then install the registry artifact in a disposable DSH profile, restart once, and verify the package version, `ask_user` assembly log, one outbound test, and one inbound command.
+
+## Public Mirror Sync
+
+The public release mirror `THEWOLFWALKER/dsh-notifier` is a filtered snapshot of dev `main`; it is not a byte-for-byte copy and is never a development target. See `docs/VERSIONING.md → Dev → Public Mirror Release Flow` for the keep/exclude inventory and the gate checklist. The exclude list intentionally keeps engineering-only files (`.agents/` skills, `.claude/ .codex/ .opencode/` pointers, `HANDOFF.md`, `ADAPTER.md`) out of the public repo while preserving the README-referenced `docs/screenshots/` so the console previews render.
+
+Walkthrough for an operator backing a filtered staging copy:
+
+```text
+# fresh filtered staging clone of the public mirror
+git clone https://github.com/THEWOLFWALKER/dsh-notifier.git release-staging
+cd release-staging
+
+# sync changed files from dev main (keep .agents/ etc. out; keep docs/screenshots in)
+cp -r ../dsh-notifier-dev/src ./
+cp -r ../dsh-notifier-dev/test ./
+cp -r ../dsh-notifier-dev/scripts ./
+cp ../dsh-notifier-dev/package.json ../dsh-notifier-dev/README.md \
+   ../dsh-notifier-dev/README.zh-CN.md ../dsh-notifier-dev/CHANGELOG.md \
+   ../dsh-notifier-dev/LICENSE ../dsh-notifier-dev/THIRD_PARTY_NOTICES.md \
+   ../dsh-notifier-dev/PLUGINS.md ../dsh-notifier-dev/cordis.patch.yml ./
+cp -r ../dsh-notifier-dev/docs/guide.md ../dsh-notifier-dev/docs/upgrade-guide.md \
+   ../dsh-notifier-dev/docs/upgrade-guide.en.md ../dsh-notifier-dev/docs/VERSIONING.md \
+   ../dsh-notifier-dev/docs/OPERATIONS.md ../dsh-notifier-dev/docs/screenshots ./docs/
+
+git status --short                # review exactly what moved
+git diff --stat
+git commit -am "release: sync dev main to v0.9.x"
+
+# publish the filtered snapshot (negotiate auth per machine)
+git push origin main
+```
+
+Keep the public `main` pointer aligned to a reviewed dev `main`. Never force-push over published history; reconcile drift forward from dev `main`. After the push, confirm the mirror head matches dev `main` for the kept files before declaring the release.
