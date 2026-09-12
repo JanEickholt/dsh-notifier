@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] - 2026-09-12（codex/admin-zero-config-onboarding 分支）
+## [0.9.6] - 2026-09-12（codex/admin-zero-config-onboarding 收口）
 
 「零配置首访」特性线：安装后不写 YAML——打开终端打印的启动链接，选通知渠道、填凭证、当场收到测试通知；远程控制以后再配。`npm test` 为 **1544**（1544 pass，较 0.9.5 基线 1531 净 +13；`admin-ui-behavior` 套件按新鉴权/向导契约整体重写为 46 项）。
 
@@ -29,7 +29,7 @@
 ### 已知残留
 
 - `docs/screenshots/admin-*.png` 旧版实拍已随新 UI 上线删除（README 双语引用同步移除）；新 UI 真机截图待拍后回补。
-- 版本号与 `dshQuality.testCount` 未随分支推进（发布门统一在 release 时收口）。
+- 版本号与 `dshQuality.testCount` 已在 v0.9.6 收口为 `1544`（1544 pass，发布门通过）。
 
 ## [0.9.5] - 2026-08-28
 
