@@ -9,7 +9,7 @@ node scripts/gen-channel-matrix.mjs --check
 node --check src/index.mjs
 ```
 
-The current development baseline is `1531` tests (`1531` pass) on the v0.9.5 line (R1–R5 closed 2026-09-05). The published npm `latest` remains `0.9.0` (1352-test artifact) until v0.9.5 is published; the v0.8.6 artifact historically records `909`. Do not change `package.json`'s release count to make these baselines look identical. The public GitHub source mirror (`main`) is synced to v0.9.5. Desktop/host and provider protocol behavior still require real-device validation where noted below.
+The current release baseline is `1544` tests (`1544` pass) on the v0.9.6 line (published 2026-09-12). The published npm `latest` is now `0.9.6`; the preceding v0.9.5 line closed at `1531`, v0.9.0 used `1352`, and the v0.8.6 artifact historically records `909`. Do not change `package.json`'s release count to make these baselines look identical. The public GitHub source mirror (`main`) is synced to v0.9.6. Desktop/host and provider protocol behavior still require real-device validation where noted below.
 
 The project has no install step for runtime tests. Optional packages are needed only for the corresponding real inbound flows: Feishu SDK, QQ connector, or QR terminal rendering.
 
