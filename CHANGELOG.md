@@ -2,12 +2,14 @@
 
 ## [Unreleased]（codex/notification-lang-setting）
 
-新增配置项 `lang: 'zh' | 'en'`（默认 zh，零行为变化）：自动推送文案（turn/end · approval/asked · agent/error · longRunning/stall 的 headline 与自有 detail/正文模板）改为从 `src/strings.mjs` 文案表取词，`lang: 'en'` 时输出英文。助手摘录、错误原文等宿主数据片段不翻译（它们本就是会话语言）；账本晨报（`ledger.mjs`）与 `notify` 工具描述不在本次范围。非法 `lang` 值回落 zh（与 `redaction` 归一化同法）。文案表中 zh 条目与 0.9.7 硬编码逐字节一致。
+新增配置项 `lang: 'zh' | 'en'`（默认 zh，零行为变化）：自动推送文案（turn/end · approval/asked · agent/error · longRunning/stall 的 headline 与自有 detail/正文模板、stall/心跳动作卡片的「⏹ 停止任务」按钮 label）改为从 `src/strings.mjs` 文案表取词，`lang: 'en'` 时输出英文。助手摘录、错误原文等宿主数据片段不翻译（它们本就是会话语言）；账本晨报（`ledger.mjs`）与 `notify` 工具描述不在本次范围。非法 `lang` 值回落 zh（与 `redaction` 归一化同法），且 `stringsOf` 做 own-property 校验（`__proto__`/`constructor` 等继承键不命中表）。文案表中 zh 条目与 0.9.7 硬编码逐字节一致。
 
-- `src/strings.mjs`（新增）：zh/en 双语文案表 + `stringsOf(lang)`（未知值回落 zh）。
+已知影响（记录，不在本次修）：`lang: 'en'` 时账本晨报的 `classifyTitle` 中文 KIND_PATTERNS 匹配不到英文 headline，英文推送在晨报统计里归入 `other`（明细统计降级，推送本身不受影响）；后续修法 = classifyTitle 按语言标记表匹配。
+
+- `src/strings.mjs`（新增）：zh/en 双语文案表 + `stringsOf(lang)`（未知值回落 zh，own-property 校验）。
 - `src/config.mjs`：`resolveConfig` 归一化 `lang`（仅接受 `'en'`，其余回落 `'zh'`）。
-- `src/event-listener.mjs`：`TURN_END_META` 只留级别，headline/detail 取自文案表；`intentOfSessionEvent` / `intentOfAgentError` 增加可选 `strings` 参数（缺省 zh，既有调用方零感知）；`composeStatusBody`、longRunning/stall headline、turn/start headline 走文案表。
-- 测试：`test/lang-strings.test.mjs` 6 项 focused（默认逐字节一致 / en 切换 / 未知回落 / 错误原文不翻译 / titlePrefix 组合）；全量 `npm test` 1554 pass（1548 基线 + 6）。README 测试计数基线按 train close 惯例不动。
+- `src/event-listener.mjs`：`TURN_END_META` 只留级别，headline/detail 取自文案表；`intentOfSessionEvent` / `intentOfAgentError` 增加可选 `strings` 参数（缺省 zh，既有调用方零感知）；`composeStatusBody`、longRunning/stall headline、turn/start headline、动作卡片按钮 label 走文案表。
+- 测试：`test/lang-strings.test.mjs` 8 项 focused（默认逐字节 deepEqual 一致 / en 切换 / 未知与继承键回落 / zh-en 表 key 形状一致防单边漂移 / 错误原文不翻译 / titlePrefix 组合 / createEventListener lang:'en' 状态正文路径）；全量 `npm test` 1556 pass（1548 基线 + 8）。README 测试计数基线按 train close 惯例不动。
 
 ## [0.9.7] - 2026-09-12（codex/pr22-issue23-fix 收口）
 

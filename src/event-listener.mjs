@@ -375,7 +375,7 @@ export function createEventListener(ctx, notifier, resolvedConfig, wiring = {}) 
           chatId: target.chatId,
           title: message.title,
           content: message.content,
-          actions: [{ label: '⏹ 停止任务', data }],
+          actions: [{ label: strings.status.stopActionLabel, data }],
         })).then((card) => {
           if (card === null || card === undefined) {
             try { dispatcher.unmarkSource(minted.key, inbound.channel, String(target.chatId)) } catch { /* 撤销失败不致命 */ }

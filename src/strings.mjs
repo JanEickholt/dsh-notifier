@@ -38,6 +38,7 @@ const ZH = {
     runtimeLine: (elapsed, idle) => `已运行 ${elapsed}，最近活动 ${idle} 前`,
     stallHint: '长工具执行可能误报；可回复 /stop 取消，或调大 events.stall.afterMs',
     stopHint: '回复 /stop 取消',
+    stopActionLabel: '⏹ 停止任务',
     recentOutputPrefix: '最近输出：',
   },
 }
@@ -76,13 +77,15 @@ const EN = {
     runtimeLine: (elapsed, idle) => `Ran ${elapsed}, last activity ${idle} ago`,
     stallHint: 'Long tool call may be a false alarm; reply /stop to cancel, or raise events.stall.afterMs',
     stopHint: 'Reply /stop to cancel',
+    stopActionLabel: '⏹ Stop task',
     recentOutputPrefix: 'Recent output: ',
   },
 }
 
 const TABLE = { zh: ZH, en: EN }
 
-/** 按语言取文案表；未知/缺失回落 zh。 */
+/** 按语言取文案表；未知/缺失回落 zh。own-property 校验：避免 `__proto__`/`constructor`
+ *  等继承键命中 TABLE 原型链（CodeRabbit：返回非表对象会让格式化侧读出 undefined）。 */
 export function stringsOf(lang) {
-  return TABLE[lang] ?? ZH
+  return Object.prototype.hasOwnProperty.call(TABLE, lang) ? TABLE[lang] : ZH
 }
