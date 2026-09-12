@@ -11,15 +11,19 @@ test('stringsOf: 未知语言回落 zh；继承键（__proto__/constructor）不
   assert.equal(stringsOf('constructor'), stringsOf('zh'))
 })
 
-test('stringsOf: zh/en 表 key 形状一致（防单边漂移）', () => {
+/** 递归 key 形状对比（函数按同位置处理，只对形状不做内容比较）。 */
+function keyShape(obj, path = [], out = []) {
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) keyShape(value, [...path, key], out)
+    else out.push([...path, key].join('.'))
+  }
+  return out
+}
+
+test('stringsOf: zh/en 表 key 形状一致（全节递归，防单边漂移）', () => {
   const zh = stringsOf('zh')
   const en = stringsOf('en')
-  assert.deepEqual(Object.keys(en), Object.keys(zh))
-  assert.deepEqual(Object.keys(en.turnEndHeadline), Object.keys(zh.turnEndHeadline))
-  assert.deepEqual(Object.keys(en.turnEndDetail), Object.keys(zh.turnEndDetail))
-  assert.deepEqual(Object.keys(en.approval), Object.keys(zh.approval))
-  assert.deepEqual(Object.keys(en.agentError), Object.keys(zh.agentError))
-  assert.deepEqual(Object.keys(en.status), Object.keys(zh.status))
+  assert.deepEqual(keyShape(en), keyShape(zh))
 })
 
 test('resolveConfig: lang 归一化 — en 保留，未知回落 zh', () => {
@@ -157,6 +161,18 @@ test('createEventListener: lang en — stall/longRunning 状态正文与 headlin
   assert.equal(pushes[1].title, '⏱ Task still running')
   assert.equal(pushes[1].level, 'passive')
   assert.match(pushes[1].content, /long test running/, '心跳附最近输出摘录')
-  assert.match(pushes[1].content, /^ws \/ sess-sta\nRan 15m, last activity .+ ago\n/m, 'EN 时长行')
+  assert.match(pushes[1].content, /^ws \/ sess-sta\nRunning 15m, last activity .+ ago\n/m, 'EN 时长行')
   dispose()
+})
+
+test('lang en: commands/actions/adapter 段为英文（防 zh 副本回潮）', () => {
+  const en = stringsOf('en')
+  assert.equal(en.commands.pairUsage.startsWith('Usage: /pair'), true)
+  assert.equal(en.commands.pairSuccess('x', 'h').startsWith('Paired!'), true)
+  assert.equal(en.actions.executed, '✅ Executed')
+  assert.equal(en.commands.channelNames.feishu, 'Feishu')
+  assert.equal(en.telegram.refExpired.startsWith('This action'), true)
+  assert.equal(en.feishu.approvalResolvedTitle, 'Approval completed')
+  assert.equal(en.qq.resultLine('y'), '[Approval result] y')
+  assert.equal(en.bus.identityLine('Telegram', 'u1'), 'Your Telegram identity is u1.')
 })
